@@ -7,25 +7,32 @@ import { TokenField } from './components/TokenField.tsx'
 import { BATCH_SIZE, draw, drawFromPool } from './lib/draw.ts'
 import { ApiError, loadToken, saveToken } from './lib/github.ts'
 import { newSeed } from './lib/random.ts'
-import type { EraBias, Failure, Quota, Repo } from './lib/types.ts'
+import type { DrawMode, EraBias, Failure, Quota, Repo, Resource } from './lib/types.ts'
 
 type Theme = 'press' | 'terminal'
 
 const THEME_KEY = 'randomcode.theme'
 
 /** Seed and settings ride in the URL so a batch can be shared and reproduced. */
-function readUrl(): { seed: string | null; minStars: number; eraBias: EraBias } {
+function readUrl(): {
+  seed: string | null
+  minStars: number
+  eraBias: EraBias
+  deep: boolean
+} {
   const p = new URLSearchParams(location.search)
   const stars = Number(p.get('stars'))
   return {
     seed: p.get('seed'),
     minStars: Number.isFinite(stars) && stars >= 0 ? stars : 5,
     eraBias: p.get('era') === 'volume' ? 'volume' : 'time',
+    deep: p.get('deep') === '1',
   }
 }
 
-function writeUrl(seed: string, minStars: number, eraBias: EraBias): void {
+function writeUrl(seed: string, minStars: number, eraBias: EraBias, deep: boolean): void {
   const p = new URLSearchParams({ seed, stars: String(minStars), era: eraBias })
+  if (deep) p.set('deep', '1')
   history.replaceState(null, '', `?${p.toString()}`)
 }
 
@@ -44,12 +51,18 @@ export default function App() {
   const [token, setToken] = useState(loadToken)
   const [minStars, setMinStars] = useState(initial.current.minStars)
   const [eraBias, setEraBias] = useState<EraBias>(initial.current.eraBias)
+  const [deep, setDeep] = useState(initial.current.deep)
 
   const [repos, setRepos] = useState<Repo[]>([])
   const [pool, setPool] = useState<Repo[]>([])
   const [seed, setSeed] = useState(initial.current.seed ?? '')
   const [provenance, setProvenance] = useState('')
-  const [quota, setQuota] = useState<Quota | null>(null)
+  /*
+   * Quota per bucket. Deep mode spends core on the id listing and search on
+   * hydration, and the limits differ by an order of magnitude, so collapsing
+   * them into one figure would report the wrong wait.
+   */
+  const [quotas, setQuotas] = useState<Partial<Record<Resource, Quota>>>({})
   const [failure, setFailure] = useState<Failure | null>(null)
   const [busy, setBusy] = useState(false)
   const [registered, setRegistered] = useState(false)
@@ -64,31 +77,46 @@ export default function App() {
   }, [theme])
 
   const run = useCallback(
-    async (nextSeed: string, stars: number, era: EraBias, usePool: boolean) => {
+    async (
+      nextSeed: string,
+      stars: number,
+      era: EraBias,
+      isDeep: boolean,
+      usePool: boolean,
+    ) => {
       setBusy(true)
       setFailure(null)
       setRegistered(false)
 
       try {
-        // A pool draw costs no quota — this is what stretches 10 requests/min.
+        const mode: DrawMode = isDeep ? 'deep' : stars > 0 ? 'curated' : 'raw'
+        // A pool draw skips the expensive request — this is what stretches the quota.
         const result =
           usePool && pool.length >= BATCH_SIZE
-            ? drawFromPool(pool, nextSeed)
-            : await draw({ mode: stars > 0 ? 'curated' : 'raw', minStars: stars, eraBias: era, seed: nextSeed }, token)
+            ? await drawFromPool(pool, nextSeed, token)
+            : await draw({ mode, minStars: stars, eraBias: era, seed: nextSeed }, token)
 
         setRepos(result.repos)
         setPool(result.pool)
         setProvenance(result.provenance)
-        if (result.quota) setQuota(result.quota)
+        setQuotas((prev) => ({ ...prev, ...result.quotas }))
         setSeed(nextSeed)
-        writeUrl(nextSeed, stars, era)
+        writeUrl(nextSeed, stars, era, isDeep)
         // Let the ink layers slide into register once the batch is on screen.
         requestAnimationFrame(() => setRegistered(true))
       } catch (err) {
         if (err instanceof ApiError) {
           setFailure(err.failure)
-          if (err.failure.kind === 'quota' && err.failure.resetAt) {
-            setQuota((q) => (q ? { ...q, remaining: 0, resetAt: err.failure.resetAt! } : q))
+          // Mark the bucket that actually ran dry, so the countdown is the right one.
+          const { resetAt, resource } = err.failure
+          if (err.failure.kind === 'quota' && resetAt && resource) {
+            setQuotas((prev) => {
+              const known = prev[resource]
+              return {
+                ...prev,
+                [resource]: { limit: known?.limit ?? 0, remaining: 0, resetAt },
+              }
+            })
           }
         } else {
           setFailure({ kind: 'unknown', message: '抽取过程中断了。再点一次试试。' })
@@ -101,13 +129,19 @@ export default function App() {
   )
 
   const onDraw = useCallback(() => {
-    void run(newSeed(), minStars, eraBias, true)
-  }, [run, minStars, eraBias])
+    void run(newSeed(), minStars, eraBias, deep, true)
+  }, [run, minStars, eraBias, deep])
 
   // Reproduce a shared link's batch on first load.
   useEffect(() => {
     if (initial.current.seed) {
-      void run(initial.current.seed, initial.current.minStars, initial.current.eraBias, false)
+      void run(
+        initial.current.seed,
+        initial.current.minStars,
+        initial.current.eraBias,
+        initial.current.deep,
+        false,
+      )
     }
     // Deliberately once, on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -124,10 +158,19 @@ export default function App() {
     setPool([])
   }, [])
 
+  /*
+   * Deep mode draws from the id space instead of search, so pooled results from
+   * the other mode don't belong to the new query either way.
+   */
+  const onDeep = useCallback((next: boolean) => {
+    setDeep(next)
+    setPool([])
+  }, [])
+
   const onSaveToken = useCallback((next: string) => {
     saveToken(next)
     setToken(next)
-    setQuota(null)
+    setQuotas({})
   }, [])
 
   return (
@@ -184,9 +227,11 @@ export default function App() {
         onMinStars={onMinStars}
         eraBias={eraBias}
         onEraBias={onEraBias}
+        deep={deep}
+        onDeep={onDeep}
         onDraw={onDraw}
         busy={busy}
-        quota={quota}
+        quotas={quotas}
         poolSize={pool.length}
       />
 
@@ -196,7 +241,13 @@ export default function App() {
 
       {repos.length > 0 &&
         (theme === 'terminal' ? (
-          <TerminalView repos={repos} seed={seed} />
+          <TerminalView
+            repos={repos}
+            seed={seed}
+            minStars={minStars}
+            eraBias={eraBias}
+            deep={deep}
+          />
         ) : (
           <section className="sheet" aria-label={`第 ${seed} 批，共 ${repos.length} 个仓库`}>
             {repos.map((repo) => (

@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react'
 import type { Failure } from '../lib/types.ts'
 
+/** A core-bucket wait runs to the hour, so seconds alone stop being readable. */
+function waitLabel(seconds: number): string {
+  if (seconds < 60) return `${seconds} 秒`
+  const mins = Math.floor(seconds / 60)
+  if (mins < 60) return `${mins} 分钟`
+  return `${Math.floor(mins / 60)} 小时 ${mins % 60} 分钟`
+}
+
 /**
  * Failures give direction, not mood. A quota wall says how long the wait is and
  * what shortens it; it doesn't apologize or tell anyone to try again later.
@@ -29,10 +37,16 @@ export function Notice({ failure }: { failure: Failure }) {
   let detail = failure.message
   if (failure.kind === 'quota' && failure.resetAt) {
     const left = Math.max(0, failure.resetAt - Math.floor(Date.now() / 1000))
-    detail =
-      left > 0
-        ? `${failure.message}，${left} 秒后恢复。加个 token 能提到 30 次/分钟。`
-        : '配额已经恢复了，再抽一次就行。'
+    /*
+     * The two buckets refill on different clocks and a token lifts them by
+     * different amounts, so the wait has to name the right one. Core is what deep
+     * water runs out of, and an hour-long wait can't be quoted in seconds.
+     */
+    const lift =
+      failure.resource === 'core'
+        ? '加个 token 能把仓库列表提到 5000 次/小时。'
+        : '加个 token 能提到 30 次/分钟。'
+    detail = left > 0 ? `${failure.message}，${waitLabel(left)}后恢复。${lift}` : '配额已经恢复了，再抽一次就行。'
   }
 
   return (

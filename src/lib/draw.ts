@@ -14,7 +14,7 @@ import {
 } from './github.ts'
 import { buildSearchPlan, maxPage, narrowPlan, MAX_REPO_ID } from './sample.ts'
 import { hashSeed, mulberry32, randomInt, shuffle } from './random.ts'
-import type { DrawParams, Quota, Repo } from './types.ts'
+import type { DrawParams, Quota, Repo, Resource } from './types.ts'
 
 export const BATCH_SIZE = 12
 
@@ -22,7 +22,13 @@ export interface DrawResult {
   repos: Repo[]
   /** Leftovers for the next draw. */
   pool: Repo[]
-  quota: Quota | null
+  /**
+   * Quota readings taken during this draw, keyed by bucket. Deep mode touches
+   * both — the id listing spends core, hydration spends search — and the two
+   * limits are far apart (60/hour vs 10/min), so one combined number would
+   * misreport whichever bucket the UI happened not to show.
+   */
+  quotas: Partial<Record<Resource, Quota>>
   /** Describes where this batch came from, shown in the colophon. */
   provenance: string
 }
@@ -129,7 +135,7 @@ async function drawFromSearch(
     return {
       repos: shuffled.slice(0, BATCH_SIZE),
       pool: shuffled.slice(BATCH_SIZE),
-      quota,
+      quotas: quota ? { search: quota } : {},
       provenance:
         `时间窗 ${windowLabel} 起 ${formatMinutes(plan.window.minutes)}，` +
         `窗内 ${total.toLocaleString('zh-CN')} 个仓库${capped}，抽的是第 ${page} 页`,
@@ -165,13 +171,25 @@ async function drawFromIdSpace(
     })
   }
 
-  const picked = shuffle(listing.repos, rng).slice(0, BATCH_SIZE)
+  /*
+   * A listing returns 100 rows for one core request, and core is the tighter
+   * bucket here — 60/hour against search's 600. So the leftovers pool the same
+   * way search results do, and a later deep draw only pays the search request
+   * that hydrates it. That turns one listing into several draws against the
+   * bucket that runs out first.
+   */
+  const shuffled = shuffle(listing.repos, rng)
+  const picked = shuffled.slice(0, BATCH_SIZE)
   const filled = await hydrateRepos(picked, token)
+
+  const quotas: Partial<Record<Resource, Quota>> = {}
+  if (listing.quota) quotas.core = listing.quota
+  if (filled.quota) quotas.search = filled.quota
 
   return {
     repos: filled.repos,
-    pool: [],
-    quota: filled.quota ?? listing.quota,
+    pool: shuffled.slice(BATCH_SIZE),
+    quotas,
     provenance: `从仓库 id ${since.toLocaleString('zh-CN')} 往后数，没有任何排序介入`,
   }
 }
@@ -182,15 +200,38 @@ function formatMinutes(minutes: number): string {
   return `${Math.round(minutes / (60 * 24))} 天`
 }
 
-/** Take a batch from the pool. No request, no quota spent. */
-export function drawFromPool(pool: readonly Repo[], seed: string): DrawResult {
+/**
+ * Take a batch from the pool.
+ *
+ * Search-mode rows arrive complete, so this costs nothing at all. Deep-water
+ * rows come from the id listing with no stars, language or topics, so they still
+ * need the one search request that fills them in — but they skip the core
+ * request, which is the bucket deep mode actually runs out of.
+ */
+export async function drawFromPool(
+  pool: readonly Repo[],
+  seed: string,
+  token: string,
+): Promise<DrawResult> {
   const rng = mulberry32(hashSeed(seed))
   const shuffled = shuffle(pool, rng)
+  const picked = shuffled.slice(0, BATCH_SIZE)
+
+  if (picked.every((r) => r.hydrated)) {
+    return {
+      repos: picked,
+      pool: shuffled.slice(BATCH_SIZE),
+      quotas: {},
+      provenance: '来自上一次请求存下的仓库，这次没花配额',
+    }
+  }
+
+  const filled = await hydrateRepos(picked, token)
   return {
-    repos: shuffled.slice(0, BATCH_SIZE),
+    repos: filled.repos,
     pool: shuffled.slice(BATCH_SIZE),
-    quota: null,
-    provenance: '来自上一次请求存下的仓库，这次没花配额',
+    quotas: filled.quota ? { search: filled.quota } : {},
+    provenance: '来自上一次 id 列表存下的仓库，只花了一次搜索配额',
   }
 }
 

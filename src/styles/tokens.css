@@ -30,6 +30,15 @@
   --field: #e6e4d9;
 
   /*
+   * Structural borders as tokens, so the two themes can disagree about weight
+   * rather than each component re-stating a border-color override. The press
+   * needs 2px flat black — that heft is the whole look. A terminal drawn in 2px
+   * light-on-dark reads as a mockup of a press, which is what it used to be.
+   */
+  --hair: 2px;
+  --frame: var(--ink);
+
+  /*
    * Two display faces, because Big Shoulders is Latin-only — the hero reads
    * 随机捞仓库, so without a CJK face beside it the largest type on the page
    * silently falls back to whatever the system supplies. Per-glyph fallback
@@ -58,24 +67,47 @@
   --grain: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)' opacity='0.5'/%3E%3C/svg%3E");
 }
 
+/*
+ * Terminal: a phosphor console, not the press rendered in dark mode.
+ *
+ * Everything the press does with weight — 2px black frames, flat ink blocks,
+ * poster type — a terminal does with alignment and hairlines. So the frame drops
+ * to 1px and the four ink drums become the four ANSI-ish channels a log actually
+ * uses (green primary, cyan/magenta/amber accents) rather than recolored drums.
+ *
+ * Ratios computed, not eyeballed: body 14.88:1 on the ground, quiet 7.54:1,
+ * every accent above 8:1, and --rule clears 3:1 on all three surfaces it touches
+ * (3.45 ground, 3.16 raised, 3.30 field) since it carries the table structure.
+ * #556351 was one step darker and failed at 2.77 — don't darken it for looks.
+ */
 :root[data-theme='terminal'] {
-  --paper: #10120f;
-  --stock-deep: #191c17;
-  --body: #d4e5c8;
-  --quiet: #829478;
-  --rule: #586552;
-  --link: #8fd07a;
-  --field: #1b1f19;
+  --paper: #0b0f0c;
+  --stock-deep: #141a13;
+  --body: #d7e7cc;
+  --quiet: #93a889;
+  --rule: #5d6c58;
+  --link: #8ed073;
+  --field: #101510;
 
-  --federal: #6fa8dc;
-  --fluoro: #e87fc0;
-  --yellow: #d9cf5a;
-  --ink: #d4e5c8;
+  --federal: #74c7d8;
+  --fluoro: #e08fc8;
+  --yellow: #ddc06b;
+  --ink: #d7e7cc;
+
+  /* A hairline frame; 2px light-on-dark reads as a drawing of a press. */
+  --hair: 1px;
+  --frame: var(--rule);
 
   --type-display: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, monospace;
   --type-body: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, monospace;
 
-  --t-hero: clamp(2rem, 7vw, 4rem);
+  /*
+   * Monospace at press scale overflows and the CJK fallback is a system face, so
+   * the hero steps down. It still leads the page, just as a banner rather than an
+   * ink block.
+   */
+  --t-hero: clamp(1.75rem, 5.5vw, 3.25rem);
+  --pad: 1rem;
   --misregister: 0px;
 }
 

@@ -94,6 +94,7 @@ async function request<T>(path: string, token: string, resource: Resource): Prom
       kind: 'quota',
       message: resource === 'search' ? '搜索配额用完了' : '接口配额用完了',
       resetAt: quota.resetAt,
+      resource,
     })
   }
 
@@ -103,6 +104,7 @@ async function request<T>(path: string, token: string, resource: Resource): Prom
       kind: 'quota',
       message: 'GitHub 让我们慢一点',
       resetAt: Math.floor(Date.now() / 1000) + Number(retryAfter ?? 60),
+      resource,
     })
   }
 

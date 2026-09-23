@@ -55,4 +55,9 @@ export interface Failure {
   message: string
   /** Unix seconds; present for quota failures. */
   resetAt?: number
+  /**
+   * Which bucket the failure came from. Present for quota failures: deep mode
+   * spends both, and search refilling in a minute says nothing about core's hour.
+   */
+  resource?: Resource
 }

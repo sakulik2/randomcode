@@ -90,11 +90,20 @@ export default function App() {
 
       try {
         const mode: DrawMode = isDeep ? 'deep' : stars > 0 ? 'curated' : 'raw'
-        // A pool draw skips the expensive request — this is what stretches the quota.
-        const result =
-          usePool && pool.length >= BATCH_SIZE
-            ? await drawFromPool(pool, nextSeed, token)
-            : await draw({ mode, minStars: stars, eraBias: era, seed: nextSeed }, token)
+        /*
+         * A full pool serves the batch outright and skips the expensive request.
+         * A partial one — the pool drains 12 at a time out of ~88, so a remainder
+         * always survives — rides along with the next request instead of being
+         * overwritten by it. Those leftovers already cost quota to fetch.
+         */
+        const canServeFromPool = usePool && pool.length >= BATCH_SIZE
+        const result = canServeFromPool
+          ? await drawFromPool(pool, nextSeed, token)
+          : await draw(
+              { mode, minStars: stars, eraBias: era, seed: nextSeed },
+              token,
+              usePool ? pool : [],
+            )
 
         setRepos(result.repos)
         setPool(result.pool)

@@ -1,3 +1,4 @@
+import { BATCH_SIZE } from '../lib/draw.ts'
 import { STAR_STEPS } from '../lib/sample.ts'
 import type { EraBias, Quota, Resource } from '../lib/types.ts'
 
@@ -130,10 +131,19 @@ export function Controls({
         />
         {deep && <QuotaLine label="补全信息" quota={quotas.search} />}
 
+        {/*
+         * A full pool serves the next batch outright. A partial one can't, but it
+         * isn't wasted either — it rides along with the next request. Saying "不花
+         * 配额" in that case would simply be untrue.
+         */}
         {poolSize > 0 && (
           <span>
             手上还存着 {poolSize} 个，
-            {deep ? '再抽只花一次搜索配额' : '再抽不花配额'}
+            {poolSize >= BATCH_SIZE
+              ? deep
+                ? '再抽只花一次搜索配额'
+                : '再抽不花配额'
+              : '不够一批了，下次请求会把它们一起用掉'}
           </span>
         )}
       </div>

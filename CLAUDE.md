@@ -79,6 +79,19 @@ hydration request for deep-mode rows, which arrive sparse. Roughly 8 draws per
 request either way. Any change to the star floor, era bias, or draw mode must
 clear the pool (`setPool([])`), since pooled results no longer match the new query.
 
+**The pool never divides evenly, so leftovers have to be carried.** 88 drains 12
+at a time to 4, which can't fill a batch — and those 4 cost quota to fetch. So a
+fresh request passes them to `draw(params, token, leftovers)` and `assembleBatch()`
+puts them at the head of the next batch instead of `setPool()` overwriting them.
+Don't "fix" this by making `BATCH_SIZE` divide 100 evenly: `worthShowing()` filters
+rows, last pages come back partial, and deep-mode hydration silently drops
+unresolvable names, so a harvest is rarely exactly 100 and the remainder returns.
+`assembleBatch()` also dedupes by id — the same repo can legitimately surface in
+two windows, or in two orderings of one window, and a repeated card reads as a bug.
+In deep mode, assembly must happen *before* `hydrateRepos()`, since carried rows
+are raw listing rows that still need the same stacked `repo:` request to fill in.
+`test/sampling.test.ts` guards the 88 → 4 case, the dedupe, and total accounting.
+
 Two sampling modes run through search (`curated` = star floor, `raw` = no
 qualifier); `deep` mode walks the raw id space via `/repositories?since=` on the
 core bucket (60/hour). Deep-mode rows are sparse — no stars, language, or topics —

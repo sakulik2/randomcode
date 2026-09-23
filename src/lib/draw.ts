@@ -22,6 +22,8 @@ export interface DrawResult {
   repos: Repo[]
   /** Leftovers for the next draw. */
   pool: Repo[]
+  /** How many of `repos` came from the previous draw's leftovers. */
+  carried: number
   /**
    * Quota readings taken during this draw, keyed by bucket. Deep mode touches
    * both — the id listing spends core, hydration spends search — and the two
@@ -40,6 +42,43 @@ function worthShowing(repo: Repo, minStars: number): boolean {
 }
 
 /**
+ * Build a batch out of last draw's leftovers plus this request's harvest.
+ *
+ * The pool drains 12 at a time and a harvest is never a multiple of 12, so a
+ * remainder always survives — 88 leftovers drain to 4, which used to be too few
+ * to serve a batch and were then overwritten by the next request's results. Those
+ * 4 cost quota to fetch, so they lead the next batch instead of being discarded.
+ *
+ * Dedupes by id: a repo can legitimately appear in two windows (or two orderings
+ * of the same window), and the same card twice on one sheet reads as a bug.
+ */
+export function assembleBatch(
+  leftovers: readonly Repo[],
+  fresh: readonly Repo[],
+): { repos: Repo[]; pool: Repo[]; carried: number } {
+  const seen = new Set<number>()
+  const repos: Repo[] = []
+  const spare: Repo[] = []
+
+  for (const repo of leftovers) {
+    if (seen.has(repo.id)) continue
+    seen.add(repo.id)
+    if (repos.length < BATCH_SIZE) repos.push(repo)
+    else spare.push(repo)
+  }
+  const carried = repos.length
+
+  for (const repo of fresh) {
+    if (seen.has(repo.id)) continue
+    seen.add(repo.id)
+    if (repos.length < BATCH_SIZE) repos.push(repo)
+    else spare.push(repo)
+  }
+
+  return { repos, pool: spare, carried }
+}
+
+/**
  * Curated and raw modes both run on search; the only difference is whether a
  * star qualifier is attached. Raw keeps everything, including the zero-star
  * coursework that makes up most of GitHub — that's the honest sample, and seeing
@@ -48,6 +87,7 @@ function worthShowing(repo: Repo, minStars: number): boolean {
 async function drawFromSearch(
   params: DrawParams,
   token: string,
+  leftovers: readonly Repo[] = [],
 ): Promise<DrawResult> {
   const rng = mulberry32(hashSeed(params.seed))
 
@@ -132,13 +172,17 @@ async function drawFromSearch(
     }
     const windowLabel = plan.window.start.toISOString().slice(0, 10)
     const capped = total > 1000 ? '，只有前 1000 个能翻到' : ''
+    const batch = assembleBatch(leftovers, shuffled)
+    const carriedNote = batch.carried > 0 ? `，另有 ${batch.carried} 个是上次存下的` : ''
     return {
-      repos: shuffled.slice(0, BATCH_SIZE),
-      pool: shuffled.slice(BATCH_SIZE),
+      repos: batch.repos,
+      pool: batch.pool,
+      carried: batch.carried,
       quotas: quota ? { search: quota } : {},
       provenance:
         `时间窗 ${windowLabel} 起 ${formatMinutes(plan.window.minutes)}，` +
-        `窗内 ${total.toLocaleString('zh-CN')} 个仓库${capped}，抽的是第 ${page} 页`,
+        `窗内 ${total.toLocaleString('zh-CN')} 个仓库${capped}，抽的是第 ${page} 页` +
+        carriedNote,
     }
   }
 
@@ -159,6 +203,7 @@ async function drawFromSearch(
 async function drawFromIdSpace(
   params: DrawParams,
   token: string,
+  leftovers: readonly Repo[] = [],
 ): Promise<DrawResult> {
   const rng = mulberry32(hashSeed(params.seed))
   const since = randomInt(rng, 1, MAX_REPO_ID)
@@ -179,18 +224,28 @@ async function drawFromIdSpace(
    * bucket that runs out first.
    */
   const shuffled = shuffle(listing.repos, rng)
-  const picked = shuffled.slice(0, BATCH_SIZE)
-  const filled = await hydrateRepos(picked, token)
+
+  /*
+   * Assemble before hydrating, not after. Deep-water leftovers are raw listing
+   * rows with no stars or language, so they have to be inside the batch that the
+   * single stacked `repo:` request fills in — hydrating the fresh rows first and
+   * prepending the leftovers afterwards would leave the carried ones sparse.
+   */
+  const batch = assembleBatch(leftovers, shuffled)
+  const filled = await hydrateRepos(batch.repos, token)
 
   const quotas: Partial<Record<Resource, Quota>> = {}
   if (listing.quota) quotas.core = listing.quota
   if (filled.quota) quotas.search = filled.quota
 
+  const carriedNote = batch.carried > 0 ? `，其中 ${batch.carried} 个是上次存下的` : ''
   return {
     repos: filled.repos,
-    pool: shuffled.slice(BATCH_SIZE),
+    pool: batch.pool,
+    carried: batch.carried,
     quotas,
-    provenance: `从仓库 id ${since.toLocaleString('zh-CN')} 往后数，没有任何排序介入`,
+    provenance:
+      `从仓库 id ${since.toLocaleString('zh-CN')} 往后数，没有任何排序介入` + carriedNote,
   }
 }
 
@@ -221,6 +276,7 @@ export async function drawFromPool(
     return {
       repos: picked,
       pool: shuffled.slice(BATCH_SIZE),
+      carried: picked.length,
       quotas: {},
       provenance: '来自上一次请求存下的仓库，这次没花配额',
     }
@@ -230,12 +286,22 @@ export async function drawFromPool(
   return {
     repos: filled.repos,
     pool: shuffled.slice(BATCH_SIZE),
+    carried: picked.length,
     quotas: filled.quota ? { search: filled.quota } : {},
     provenance: '来自上一次 id 列表存下的仓库，只花了一次搜索配额',
   }
 }
 
-export async function draw(params: DrawParams, token: string): Promise<DrawResult> {
-  if (params.mode === 'deep') return drawFromIdSpace(params, token)
-  return drawFromSearch(params, token)
+/**
+ * `leftovers` are the pooled repos too few in number to fill a batch on their
+ * own. They lead the returned batch so a partial remainder is spent rather than
+ * discarded — see `assembleBatch`.
+ */
+export async function draw(
+  params: DrawParams,
+  token: string,
+  leftovers: readonly Repo[] = [],
+): Promise<DrawResult> {
+  if (params.mode === 'deep') return drawFromIdSpace(params, token, leftovers)
+  return drawFromSearch(params, token, leftovers)
 }

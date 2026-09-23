@@ -5,6 +5,8 @@
 import { buildSearchPlan, narrowPlan, maxPage, windowMinutesFor, STAR_STEPS } from '../src/lib/sample.ts'
 import { hashSeed, mulberry32, shuffle, randomInt } from '../src/lib/random.ts'
 import { inkFor, weightFor } from '../src/lib/ink.ts'
+import { assembleBatch, BATCH_SIZE } from '../src/lib/draw.ts'
+import type { Repo } from '../src/lib/types.ts'
 
 let fails = 0
 const ok = (cond: boolean, label: string) => {
@@ -100,6 +102,67 @@ const drums = new Set(
 )
 ok(drums.size === 4, `common languages spread across all 4 drums (got ${drums.size})`)
 ok(weightFor(0) === 1 && weightFor(5000) === 4, 'weight scales with stars')
+
+/*
+ * 10. Pool leftovers must never be dropped. The pool drains BATCH_SIZE at a time
+ * and a harvest is never a multiple of it, so a remainder always survives —
+ * those rows cost quota to fetch, so a fresh request has to consume them rather
+ * than overwrite them.
+ */
+console.log('=== pool leftovers ===')
+const fake = (id: number): Repo => ({
+  id,
+  fullName: `o${id}/r${id}`,
+  owner: `o${id}`,
+  name: `r${id}`,
+  url: '',
+  description: null,
+  language: null,
+  stars: 0,
+  forks: 0,
+  topics: [],
+  license: null,
+  createdAt: '',
+  pushedAt: '',
+  isFork: false,
+  isArchived: false,
+  hydrated: true,
+})
+
+// The exact case reported: 88 leftovers drain 12 at a time down to 4.
+let remaining = Array.from({ length: 88 }, (_, i) => fake(i + 1))
+let drains = 0
+while (remaining.length >= BATCH_SIZE) {
+  remaining = remaining.slice(BATCH_SIZE)
+  drains++
+}
+ok(drains === 7 && remaining.length === 4, `88 leftovers drain to ${remaining.length} after ${drains} batches`)
+
+const carriedBatch = assembleBatch(remaining, Array.from({ length: 100 }, (_, i) => fake(1000 + i)))
+ok(carriedBatch.repos.length === BATCH_SIZE, `carried batch is full (${carriedBatch.repos.length})`)
+ok(carriedBatch.carried === 4, `all 4 leftovers were spent (carried ${carriedBatch.carried})`)
+ok(
+  carriedBatch.repos.slice(0, 4).every((r) => r.id <= 88),
+  'leftovers lead the batch rather than being discarded',
+)
+ok(carriedBatch.pool.length === 92, `remainder pooled for next time (${carriedBatch.pool.length})`)
+
+// Nothing may be lost or duplicated across the split.
+const accounted = new Set([...carriedBatch.repos, ...carriedBatch.pool].map((r) => r.id))
+ok(accounted.size === 104, `every repo accounted for exactly once (${accounted.size} of 104)`)
+
+// A repo can appear in two windows; the same card twice on one sheet is a bug.
+const overlap = assembleBatch([fake(1), fake(2)], [fake(2), fake(3), fake(4)])
+ok(overlap.repos.length === 4, `duplicate collapsed (${overlap.repos.length} unique of 5)`)
+ok(new Set(overlap.repos.map((r) => r.id)).size === overlap.repos.length, 'no duplicate ids in a batch')
+
+// Degenerate inputs: no leftovers, and more leftovers than a batch needs.
+ok(assembleBatch([], [fake(7), fake(8)]).carried === 0, 'no leftovers -> carried 0')
+const flood = assembleBatch(Array.from({ length: 20 }, (_, i) => fake(i + 1)), [fake(500)])
+ok(
+  flood.repos.length === BATCH_SIZE && flood.carried === BATCH_SIZE && flood.pool.length === 9,
+  `oversized leftovers fill the batch and re-pool the rest (pool ${flood.pool.length})`,
+)
 
 console.log(`\n${fails} failure(s)`)
 process.exit(fails ? 1 : 0)

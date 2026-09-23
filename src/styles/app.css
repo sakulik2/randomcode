@@ -1,0 +1,693 @@
+/*
+ * Spacing lives on containers (`> * + *`), never on the components themselves.
+ * Sibling-based rules can't fight each other the way competing component
+ * margins do, and one class stays responsible for each gap.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--body);
+  font-family: var(--type-body);
+  font-size: var(--t-md);
+  line-height: 1.5;
+  /* Lining figures so star counts line up in a column. */
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Paper grain, generated rather than loaded as an image. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.4;
+  background-image: var(--grain);
+  background-size: 180px 180px;
+  mix-blend-mode: multiply;
+}
+
+:root[data-theme='terminal'] body::before {
+  opacity: 0.16;
+  mix-blend-mode: screen;
+}
+
+a {
+  color: var(--link);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+/*
+ * Fluoro pink alone reads at 2.16:1 against the stock — too faint to locate.
+ * The black ring carries the contrast (14.68:1) and the pink sits inside it, so
+ * focus stays unmistakable while still looking like it came off this press.
+ */
+:where(a, button, input, [tabindex]):focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 0;
+  box-shadow: 0 0 0 6px var(--fluoro);
+}
+
+:root[data-theme='terminal'] :where(a, button, input, [tabindex]):focus-visible {
+  outline-color: var(--link);
+  box-shadow: 0 0 0 6px var(--rule);
+}
+
+/* ---------- shell ---------- */
+
+.shell {
+  position: relative;
+  z-index: 1;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: clamp(1.25rem, 4vw, 3rem) clamp(1rem, 4vw, 3rem) 6rem;
+}
+
+.shell > * + * {
+  margin-top: clamp(1.75rem, 4vw, 3rem);
+}
+
+/* ---------- masthead ---------- */
+
+.masthead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 0.625rem;
+}
+
+.masthead__run {
+  font-size: var(--t-sm);
+  color: var(--quiet);
+}
+
+.masthead__run b {
+  color: var(--body);
+  font-weight: 600;
+}
+
+.masthead__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* ---------- hero ---------- */
+
+.hero {
+  display: grid;
+  gap: clamp(1rem, 3vw, 2rem);
+}
+
+@media (min-width: 60rem) {
+  .hero {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    align-items: end;
+  }
+}
+
+.hero__title {
+  margin: 0;
+  font-family: var(--type-display);
+  font-weight: 900;
+  font-size: var(--t-hero);
+  line-height: 0.82;
+  letter-spacing: -0.015em;
+  text-transform: none;
+}
+
+/*
+ * The hero is the draw itself. Each letter of the title carries an offset ink
+ * layer that slides into register when a draw lands — the misregistration a
+ * Riso press actually produces. One orchestrated moment, user-triggered only.
+ */
+.hero__word {
+  display: inline-block;
+  position: relative;
+  color: var(--ink);
+}
+
+.hero__word::before {
+  content: attr(data-word);
+  position: absolute;
+  inset: 0;
+  color: var(--fluoro);
+  mix-blend-mode: multiply;
+  transform: translate(var(--misregister), calc(var(--misregister) * -0.6));
+  transition: transform 0.5s var(--ease);
+}
+
+.hero__word::after {
+  content: attr(data-word);
+  position: absolute;
+  inset: 0;
+  color: var(--federal);
+  mix-blend-mode: multiply;
+  transform: translate(calc(var(--misregister) * -0.8), var(--misregister));
+  transition: transform 0.5s var(--ease);
+}
+
+/* Registered: ink layers pull to true. */
+.hero__title[data-registered='true'] .hero__word::before,
+.hero__title[data-registered='true'] .hero__word::after {
+  transform: translate(0, 0);
+}
+
+:root[data-theme='terminal'] .hero__word::before,
+:root[data-theme='terminal'] .hero__word::after {
+  content: none;
+}
+
+.hero__lede {
+  margin: 0;
+  max-width: var(--measure);
+  font-size: var(--t-lg);
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+
+.hero__lede span {
+  color: var(--quiet);
+  font-size: var(--t-md);
+  display: block;
+  margin-top: 0.5rem;
+}
+
+/* ---------- controls ---------- */
+
+.controls {
+  display: grid;
+  gap: 1.25rem;
+  border: 2px solid var(--ink);
+  padding: var(--pad);
+  background: var(--stock-deep);
+}
+
+@media (min-width: 52rem) {
+  .controls {
+    grid-template-columns: auto minmax(14rem, 1fr) auto;
+    align-items: center;
+    gap: 1.75rem;
+  }
+}
+
+.draw {
+  font-family: var(--type-display);
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  padding: 0.5rem 1.75rem;
+  border: 2px solid var(--ink);
+  background: var(--yellow);
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 0.1s var(--ease);
+}
+
+.draw:hover:not(:disabled) {
+  background: var(--fluoro);
+}
+
+.draw:active:not(:disabled) {
+  transform: translate(2px, 2px);
+}
+
+.draw:disabled {
+  cursor: progress;
+  background: var(--stock-deep);
+  color: var(--quiet);
+}
+
+:root[data-theme='terminal'] .draw {
+  background: transparent;
+  color: var(--link);
+  border-color: var(--link);
+  font-size: var(--t-md);
+}
+
+:root[data-theme='terminal'] .draw:hover:not(:disabled) {
+  background: var(--link);
+  color: var(--paper);
+}
+
+.slider {
+  display: grid;
+  gap: 0.375rem;
+}
+
+.slider__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-size: var(--t-sm);
+}
+
+.slider__value {
+  font-weight: 600;
+}
+
+.slider input {
+  width: 100%;
+  accent-color: var(--fluoro);
+  margin: 0;
+}
+
+.slider__note {
+  font-size: var(--t-xs);
+  color: var(--quiet);
+  min-height: 1.2em;
+}
+
+.segment {
+  display: inline-flex;
+  border: 2px solid var(--ink);
+}
+
+.segment button {
+  font: inherit;
+  font-size: var(--t-sm);
+  padding: 0.375rem 0.8125rem;
+  border: 0;
+  background: transparent;
+  color: var(--body);
+  cursor: pointer;
+}
+
+.segment button + button {
+  border-left: 2px solid var(--ink);
+}
+
+.segment button[aria-pressed='true'] {
+  background: var(--federal);
+  color: #fff;
+}
+
+:root[data-theme='terminal'] .segment {
+  border-color: var(--rule);
+}
+
+:root[data-theme='terminal'] .segment button + button {
+  border-left-color: var(--rule);
+}
+
+:root[data-theme='terminal'] .segment button[aria-pressed='true'] {
+  background: var(--link);
+  color: var(--paper);
+}
+
+.quota {
+  font-size: var(--t-sm);
+  color: var(--quiet);
+  display: grid;
+  gap: 0.125rem;
+  justify-items: start;
+}
+
+@media (min-width: 52rem) {
+  .quota {
+    justify-items: end;
+    text-align: right;
+  }
+}
+
+.quota b {
+  color: var(--body);
+  font-weight: 600;
+}
+
+.quota__bar {
+  display: flex;
+  gap: 2px;
+}
+
+.quota__tick {
+  width: 6px;
+  height: 12px;
+  background: var(--rule);
+}
+
+.quota__tick[data-on='true'] {
+  background: var(--federal);
+}
+
+/* ---------- token field ---------- */
+
+.tokenbar {
+  display: grid;
+  gap: 0.5rem;
+  font-size: var(--t-sm);
+}
+
+.tokenbar__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.tokenbar input {
+  font: inherit;
+  font-size: var(--t-sm);
+  padding: 0.375rem 0.625rem;
+  border: 2px solid var(--ink);
+  background: var(--field);
+  color: var(--body);
+  min-width: 0;
+  flex: 1 1 18rem;
+}
+
+:root[data-theme='terminal'] .tokenbar input {
+  border-color: var(--rule);
+}
+
+.tokenbar__note {
+  color: var(--quiet);
+  font-size: var(--t-xs);
+  max-width: var(--measure);
+}
+
+.linkish {
+  font: inherit;
+  font-size: var(--t-sm);
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* ---------- card grid ---------- */
+
+.sheet {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--gap);
+  background: var(--rule);
+  border: 2px solid var(--ink);
+}
+
+@media (min-width: 40rem) {
+  .sheet {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 64rem) {
+  .sheet {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}
+
+:root[data-theme='terminal'] .sheet {
+  border-color: var(--rule);
+  background: var(--rule);
+}
+
+/*
+ * Card size tracks star count, so a heavy repo prints large. On a six-column
+ * sheet the weights slot together without leaving holes.
+ */
+@media (min-width: 64rem) {
+  /* Dense packing, so mixed spans don't leave holes in the sheet. */
+  .sheet {
+    grid-auto-flow: row dense;
+  }
+
+  .card[data-weight='1'] {
+    grid-column: span 2;
+  }
+  .card[data-weight='2'] {
+    grid-column: span 3;
+  }
+  .card[data-weight='3'] {
+    grid-column: span 4;
+    grid-row: span 2;
+  }
+  .card[data-weight='4'] {
+    grid-column: span 6;
+    grid-row: span 2;
+  }
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: var(--pad);
+  background: var(--paper);
+  min-height: 9.5rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.card:hover {
+  background: var(--stock-deep);
+}
+
+.card__flag {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 6px;
+  background: var(--card-ink);
+  mix-blend-mode: multiply;
+}
+
+.card[data-weight='4'] .card__flag,
+.card[data-weight='3'] .card__flag {
+  height: 10px;
+}
+
+.card__lang {
+  font-size: var(--t-xs);
+  color: var(--quiet);
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.card__swatch {
+  width: 9px;
+  height: 9px;
+  background: var(--card-ink);
+  mix-blend-mode: multiply;
+  flex: none;
+}
+
+.card__name {
+  margin: 0;
+  font-family: var(--type-display);
+  font-weight: 700;
+  line-height: 0.95;
+  letter-spacing: -0.005em;
+  overflow-wrap: anywhere;
+}
+
+.card[data-weight='1'] .card__name,
+.card[data-weight='2'] .card__name {
+  font-size: 1.375rem;
+}
+
+.card[data-weight='3'] .card__name {
+  font-size: 1.875rem;
+}
+
+.card[data-weight='4'] .card__name {
+  font-size: 2.5rem;
+}
+
+.card__owner {
+  display: block;
+  font-size: var(--t-sm);
+  font-weight: 400;
+  font-family: var(--type-body);
+  color: var(--quiet);
+}
+
+.card__desc {
+  margin: 0;
+  font-size: var(--t-sm);
+  line-height: 1.45;
+  max-width: 46ch;
+  /* Descriptions run long and arrive in any language; clamp keeps the sheet even. */
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card__desc[data-empty='true'] {
+  color: var(--quiet);
+}
+
+.card__foot {
+  margin-top: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-size: var(--t-xs);
+  color: var(--quiet);
+}
+
+.card__stars {
+  color: var(--body);
+  font-weight: 600;
+}
+
+.card__tag {
+  border: 1px solid var(--rule);
+  padding: 0.0625rem 0.3125rem;
+}
+
+/* ---------- terminal list ---------- */
+
+.log {
+  border: 2px solid var(--rule);
+  padding: var(--pad);
+  font-size: var(--t-sm);
+  line-height: 1.7;
+  overflow-x: auto;
+}
+
+.log__line {
+  display: block;
+  white-space: nowrap;
+}
+
+.log__dim {
+  color: var(--quiet);
+}
+
+.log__repo {
+  color: var(--link);
+  text-decoration: none;
+}
+
+.log__repo:hover {
+  text-decoration: underline;
+}
+
+.log__stars {
+  color: var(--yellow);
+}
+
+/* ---------- notices ---------- */
+
+.notice {
+  border: 2px solid var(--ink);
+  border-left-width: 10px;
+  padding: var(--pad);
+  max-width: var(--measure);
+  display: grid;
+  gap: 0.5rem;
+}
+
+.notice[data-kind='quota'] {
+  border-left-color: var(--yellow);
+}
+
+.notice[data-kind='empty'] {
+  border-left-color: var(--federal);
+}
+
+.notice[data-kind='network'],
+.notice[data-kind='unknown'],
+.notice[data-kind='unauthorized'] {
+  border-left-color: var(--fluoro);
+}
+
+.notice h2 {
+  margin: 0;
+  font-family: var(--type-display);
+  font-size: var(--t-xl);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.notice p {
+  margin: 0;
+  font-size: var(--t-sm);
+  max-width: 56ch;
+}
+
+.empty {
+  border: 2px dashed var(--rule);
+  padding: clamp(2rem, 6vw, 4rem) var(--pad);
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
+}
+
+.empty h2 {
+  margin: 0;
+  font-family: var(--type-display);
+  font-size: var(--t-xl);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.empty p {
+  margin: 0;
+  max-width: 52ch;
+  color: var(--quiet);
+  font-size: var(--t-sm);
+}
+
+/* ---------- colophon ---------- */
+
+.colophon {
+  border-top: 2px solid var(--ink);
+  padding-top: 0.75rem;
+  font-size: var(--t-xs);
+  color: var(--quiet);
+  display: grid;
+  gap: 0.25rem;
+  max-width: var(--measure);
+}
+
+:root[data-theme='terminal'] .colophon,
+:root[data-theme='terminal'] .masthead {
+  border-color: var(--rule);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
+}
